@@ -1,0 +1,411 @@
+*&---------------------------------------------------------------------*
+*&  Include           ZIABAP001
+*&  Include para Rotinas Comuns
+*&---------------------------------------------------------------------*
+*&  Data      | Nome              | Descrição
+*&---------------------------------------------------------------------*
+*& 22.06.2010 | Rodney G. Amancio | Codificação Inicial
+*&---------------------------------------------------------------------*
+*& 29.09.2010 | Rodney G. Amancio | Alterar tipo do caminho do arquivo
+*&            |                   | na rotina de Download para String
+*&---------------------------------------------------------------------*
+
+*&---------------------------------------------------------------------*
+*& Type-Pools
+*&---------------------------------------------------------------------*
+TYPE-POOLS: pmst.
+
+*&---------------------------------------------------------------------*
+*&      Form  F_HELP_ARQUIVO
+*&---------------------------------------------------------------------*
+FORM f_help_arquivo USING p_field
+                          p_repid
+                          p_dynnr
+                 CHANGING p_value.
+
+  CALL FUNCTION 'KD_GET_FILENAME_ON_F4'
+    EXPORTING
+      program_name  = p_repid
+      dynpro_number = p_dynnr
+      field_name    = p_field
+    CHANGING
+      file_name     = p_value.
+
+ENDFORM.                    " F_HELP_ARQUIVO
+
+*&---------------------------------------------------------------------*
+*&      Form  F_DOWNLOAD_ARQUIVO
+*&---------------------------------------------------------------------*
+FORM f_download_arquivo TABLES t_arq
+                         USING p_arq.
+
+  DATA: vl_arq TYPE string. " Rodney G. Amancio - 29.09.2010
+
+  IF p_arq(2) NE '\\'.
+    vl_arq = p_arq. " Rodney G. Amancio - 29.09.2010
+    CALL FUNCTION 'GUI_DOWNLOAD'
+      EXPORTING
+        filename                = vl_arq " Rodney G. Amancio - 29.09.2010
+      TABLES
+        data_tab                = t_arq
+      EXCEPTIONS
+        file_open_error         = 1
+        file_read_error         = 2
+        no_batch                = 3
+        gui_refuse_filetransfer = 4
+        invalid_type            = 5
+        no_authority            = 6
+        unknown_error           = 7
+        bad_data_format         = 8
+        header_not_allowed      = 9
+        separator_not_allowed   = 10
+        header_too_long         = 11
+        unknown_dp_error        = 12
+        access_denied           = 13
+        dp_out_of_memory        = 14
+        disk_full               = 15
+        dp_timeout              = 16
+        OTHERS                  = 17.
+  ELSE.
+    OPEN DATASET p_arq FOR OUTPUT IN TEXT MODE ENCODING DEFAULT.
+    CHECK sy-subrc EQ 0.
+    LOOP AT t_arq.
+      TRANSFER t_arq TO p_arq.
+    ENDLOOP.
+    CLOSE DATASET p_arq.
+  ENDIF.
+
+ENDFORM.                    " F_DOWNLOAD_ARQUIVO
+
+
+*&---------------------------------------------------------------------*
+*&      Form  F_CONECTAR_DB_EXTERNO
+*&---------------------------------------------------------------------*
+FORM f_conectar_db_externo  USING p_bds.
+
+  TRY.
+      EXEC SQL.
+        connect to :p_bds
+      ENDEXEC.
+      IF sy-subrc <> 0.
+        RAISE EXCEPTION TYPE cx_sy_native_sql_error.
+      ENDIF.
+    CATCH cx_sy_native_sql_error.
+      WRITE: /001 'Error in Native SQL'.
+      STOP.
+  ENDTRY.
+
+ENDFORM.                    " F_CONECTAR_DB_EXTERNO
+
+*&---------------------------------------------------------------------*
+*&      Form  F_DESCONECTAR_DB_EXTERNO
+*&---------------------------------------------------------------------*
+FORM f_desconectar_db_externo  USING p_bds.
+
+  EXEC SQL.
+    disconnect :p_bds
+  ENDEXEC.
+
+ENDFORM.                    " F_DESCONECTAR_DB_EXTERNO
+
+*&---------------------------------------------------------------------*
+*&      Form  F_VERIFICA_RETORNO_SELECT_DB_EXTERNO
+*&---------------------------------------------------------------------*
+FORM f_checa_select_db_externo TABLES t_select.
+
+  DO.
+    EXEC SQL.
+      fetch next dbocur into :t_select
+    ENDEXEC.
+    IF sy-subrc = 0.
+      APPEND t_select.
+      CLEAR t_select.
+    ELSE.
+      EXIT.
+    ENDIF.
+  ENDDO.
+
+ENDFORM.                    " F_VERIFICA_RETORNO_SELECT
+
+*&---------------------------------------------------------------------*
+*&      Form  f_get_next_number
+*&---------------------------------------------------------------------*
+FORM f_get_next_number USING nr_range_nr TYPE inri-nrrangenr
+                             object      TYPE inri-object
+                    CHANGING number.
+
+  CALL FUNCTION 'NUMBER_GET_NEXT'
+    EXPORTING
+      nr_range_nr             = nr_range_nr
+      object                  = object
+    IMPORTING
+      number                  = number
+    EXCEPTIONS
+      interval_not_found      = 1
+      number_range_not_intern = 2
+      object_not_found        = 3
+      quantity_is_0           = 4
+      quantity_is_not_1       = 5
+      interval_overflow       = 6
+      buffer_overflow         = 7
+      OTHERS                  = 8.
+
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+            WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+  ENDIF.
+
+ENDFORM.                    "f_get_next_number
+
+*&---------------------------------------------------------------------*
+*&      Form  f_enviar_email
+*&---------------------------------------------------------------------*
+FORM f_enviar_email TABLES t_msg
+                     USING assunto
+                           anexo
+                           destinario.
+
+  DATA: vl_lf(2) TYPE c.
+
+  vl_lf = cl_abap_char_utilities=>cr_lf.
+
+  DATA BEGIN OF t_t015 OCCURS 0.
+          INCLUDE STRUCTURE z20fit015.
+  DATA END OF t_t015.
+
+  LOOP AT t_msg.
+    CONCATENATE t_t015-zmens vl_lf t_msg INTO t_t015-zmens.
+  ENDLOOP.
+
+  t_t015-zdata = sy-datum.
+  t_t015-zassunto = assunto.
+  t_t015-zpara    = destinario.
+  t_t015-znumitem = 1.
+  IF anexo IS INITIAL.
+    CLEAR t_t015-zanexo.
+  ELSE.
+    t_t015-zanexo   = anexo.
+  ENDIF.
+  APPEND t_t015.
+
+  DELETE FROM z20fit015 WHERE znumitem >= '000'.
+* Begin - Rodney G. Amancio - 08.11.2010
+*      INSERT z20fit015 FROM TABLE t_t015.
+  MODIFY z20fit015 FROM TABLE t_t015.
+* End   - Rodney G. Amancio - 08.11.2010
+  IF sy-subrc = 0.
+    COMMIT WORK.
+    CLEAR t_t015.
+    REFRESH t_t015.
+  ENDIF.
+
+ENDFORM.                    "f_enviar_email
+
+*&---------------------------------------------------------------------*
+*&      Form  F_UPLOAD_ARQUIVO
+*&---------------------------------------------------------------------*
+FORM f_upload_arquivo TABLES t_arq
+                       USING p_arq.
+
+  DATA: vl_arq TYPE string.
+
+  IF p_arq(2) EQ '\\' OR sy-batch EQ 'X'.
+    OPEN DATASET p_arq FOR INPUT IN TEXT MODE ENCODING DEFAULT.
+    IF sy-subrc EQ 0.
+      DO.
+        READ DATASET p_arq INTO t_arq.
+        IF sy-subrc NE 0.
+          EXIT.
+        ENDIF.
+        APPEND t_arq.
+        CLEAR t_arq.
+      ENDDO.
+    ENDIF.
+  ELSE.
+    MOVE p_arq TO vl_arq.
+    CALL FUNCTION 'GUI_UPLOAD'
+      EXPORTING
+        filename                = vl_arq
+      TABLES
+        data_tab                = t_arq
+      EXCEPTIONS
+        file_open_error         = 1
+        file_read_error         = 2
+        no_batch                = 3
+        gui_refuse_filetransfer = 4
+        invalid_type            = 5
+        no_authority            = 6
+        unknown_error           = 7
+        bad_data_format         = 8
+        header_not_allowed      = 9
+        separator_not_allowed   = 10
+        header_too_long         = 11
+        unknown_dp_error        = 12
+        access_denied           = 13
+        dp_out_of_memory        = 14
+        disk_full               = 15
+        dp_timeout              = 16
+        OTHERS                  = 17.
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+              WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+    ENDIF.
+
+  ENDIF.
+
+ENDFORM.                    "F_UPLOAD_ARQUIVO
+
+*&---------------------------------------------------------------------*
+*&      Form  F_PREENCHER_BDC
+*&---------------------------------------------------------------------*
+FORM f_preencher_bdc TABLES t_bdc   STRUCTURE bdcdata
+                      USING p_start TYPE c
+                            p_name  TYPE bdcdata-fnam
+                            p_value TYPE any.
+
+  DATA: w_bdc TYPE bdcdata.
+
+  MOVE p_start TO w_bdc-dynbegin.
+  IF p_start = 'X'.
+    MOVE:
+      p_name  TO w_bdc-program,
+      p_value TO w_bdc-dynpro.
+  ELSE.
+    MOVE:
+      p_name  TO w_bdc-fnam,
+      p_value TO w_bdc-fval.
+  ENDIF.
+  APPEND w_bdc TO t_bdc.
+  CLEAR  w_bdc.
+
+ENDFORM.                    " F_PREENCHER_BDC
+
+*&---------------------------------------------------------------------*
+*&      Form  F_CALL_TRANSACTION
+*&---------------------------------------------------------------------*
+FORM f_call_transaction TABLES t_bdc STRUCTURE bdcdata
+                               t_msg STRUCTURE bdcmsgcoll
+                         USING tcode
+                               mode
+                               update
+                               pasta
+                      CHANGING subrc TYPE sy-subrc.
+
+  DATA: vl_mode   TYPE c,
+        vl_update TYPE c VALUE 'S'.
+
+  MOVE mode TO vl_mode.
+  IF NOT update IS INITIAL.
+    MOVE update TO vl_update.
+  ENDIF.
+
+  CALL TRANSACTION tcode USING t_bdc
+                          MODE vl_mode
+                        UPDATE vl_update
+                      MESSAGES INTO t_msg.
+
+  LOOP AT t_msg WHERE msgtyp NE 'I'
+                  AND msgtyp NE 'S'
+                  AND msgtyp NE 'W'.
+    subrc = 4.
+  ENDLOOP.
+
+  IF sy-subrc EQ 0 AND NOT pasta IS INITIAL.
+    PERFORM f_bdc_open USING pasta.
+    PERFORM f_monta_bdc TABLES t_bdc USING tcode.
+    PERFORM f_bdc_close.
+  ENDIF.
+
+ENDFORM.                    " F_CALL_TRANSACTION
+
+*&---------------------------------------------------------------------*
+*&      Form  F_BDC_OPEN
+*&---------------------------------------------------------------------*
+FORM f_bdc_open USING pasta.
+
+  CALL FUNCTION 'BDC_OPEN_GROUP'
+    EXPORTING
+      group = pasta
+      keep  = 'X'
+      user  = sy-uname.
+
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+            WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+  ENDIF.
+
+ENDFORM.                    " F_BDC_OPEN
+
+*&---------------------------------------------------------------------*
+*&      Form  F_MONTA_BDC
+*&---------------------------------------------------------------------*
+FORM f_monta_bdc TABLES t_bdc STRUCTURE bdcdata
+                  USING tcode.
+
+  CALL FUNCTION 'BDC_INSERT'
+    EXPORTING
+      tcode     = tcode
+    TABLES
+      dynprotab = t_bdc.
+
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+            WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+  ENDIF.
+
+ENDFORM.                    " F_MONTA_BDC
+
+*&---------------------------------------------------------------------*
+*&      Form  F_BDC_CLOSE
+*&---------------------------------------------------------------------*
+FORM f_bdc_close .
+
+  CALL FUNCTION 'BDC_CLOSE_GROUP'
+    EXCEPTIONS
+      not_open    = 1
+      queue_error = 2
+      OTHERS      = 3.
+
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+            WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+  ENDIF.
+
+ENDFORM.                    " F_BDC_CLOSE
+
+*&---------------------------------------------------------------------*
+*&      Form  F_GET_MESSAGE
+*&---------------------------------------------------------------------*
+FORM f_get_message USING w_messtab TYPE bdcmsgcoll
+                CHANGING p_msg     TYPE pmst_raw_message.
+
+  DATA: vl_msgv1 TYPE sy-msgv1,
+        vl_msgv2 TYPE sy-msgv2,
+        vl_msgv3 TYPE sy-msgv3,
+        vl_msgv4 TYPE sy-msgv4,
+        vl_msgno TYPE sy-msgno,
+        vl_msgid TYPE sy-msgid,
+        vl_msgty TYPE sy-msgty.
+
+  vl_msgv1 = w_messtab-msgv1.
+  vl_msgv2 = w_messtab-msgv2.
+  vl_msgv3 = w_messtab-msgv3.
+  vl_msgv4 = w_messtab-msgv4.
+  vl_msgno = w_messtab-msgnr.
+  vl_msgid = w_messtab-msgid.
+  vl_msgty = w_messtab-msgtyp.
+
+  CALL FUNCTION 'CUTC_GET_MESSAGE'
+    EXPORTING
+      msg_type    = vl_msgty
+      msg_id      = vl_msgid
+      msg_no      = vl_msgno
+      msg_arg1    = vl_msgv1
+      msg_arg2    = vl_msgv2
+      msg_arg3    = vl_msgv3
+      msg_arg4    = vl_msgv4
+      language    = sy-langu
+    IMPORTING
+      raw_message = p_msg.
+
+ENDFORM.                    " F_GET_MESSAGE
